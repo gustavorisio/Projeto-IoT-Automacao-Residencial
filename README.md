@@ -52,15 +52,21 @@ cd Projeto-IoT-Automacao-Residencial
 Primeiro, Inicie o Simulador no wokwi, apos isso abra outro terminal no vscode.
 
 Terminal Normal:
+```
 python upload_manual.py ssd1306.py ssd1306.py rfc2217://localhost:4000
-depois:
+```
+depois execute no terminal:
+```
 python upload_manual.py main.py main.py rfc2217://localhost:4000
+```
 
 Volte para o terminal Wokwi Diagram.json:
 Ctrl + B
 Ctrl + D
 Terminal normal para instalar mqtt:
-pip install paho-mqtt 
+```
+pip install paho-mqtt
+```
 
 5. Observe o console do dispositivo na simulação para ver as mensagens de inicialização, a versão do MicroPython e os logs MQTT.
 
