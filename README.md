@@ -2,37 +2,43 @@ Este repositório contém meu projeto individual de automação residencial usan
 
 Resumo
 
-- Dispositivo: ESP32 rodando MicroPython (simulado no Wokwi)
-- Comunicação: MQTT (HiveMQ sugerido)
-- Orquestração/visualização: Node-RED (dashboard em tempo real)
-- Interface embarcada: página web servida pelo ESP32 + painel OLED (SSD1306)
-- Persistência: registros em Google Sheets a cada 2 horas
-- Notificações: envio de e-mail quando são gerados alertas
+- **Dispositivo:** ESP32 rodando MicroPython (simulado via Wokwi no VS Code)
+- **Comunicação:** MQTT Seguro (HiveMQ Cloud via TLS/SSL na porta 8883)
+- **Orquestração/Visualização:** Node-RED (Dashboard em tempo real)
+- **Interface Embarcada:** Página Web local (servida via Socket na porta 80) + Display OLED (SSD1306 via I2C)
+- **Persistência de Dados:** Registro histórico de sensores no Google Sheets a cada 2 horas (via Node-RED)
+- **Notificações:** Envio de e-mail automático em caso de alertas críticos de segurança (vazamento de gás)
 
-Funcionalidades implementadas
+## Funcionalidades Implementadas
 
-- Leitura de 4 sensores distintos (ex.: DHTxx, LDR via ADC, PIR, reed switch)
-- Controle de 4 atuadores (ex.: LEDs, relé, ventilador) via página web do ESP32 e via Node-RED
-- Comunicação bidirecional MQTT entre ESP32 e Node-RED
-- Dashboard em Node-RED com visualização em tempo real e botões de controle
-- Gravação de dados em Google Sheets a cada 2 horas (via Node-RED)
-- Envio de e-mail de alerta quando thresholds são excedidos
+- **Leitura de 4 Sensores:** - Temperatura e Umidade (**DHT22**)
+  - Luminosidade (**LDR** via conversor ADC de 11dB)
+  - Presença/Movimento (**PIR**)
+  - Concentração de Gás/Fumaça (**MQ2** com amostragem por média e conversão para PPM)
+- **Controle de Atuadores:** - 4 Relés simulando cargas residenciais (Sala, Ar Condicionado, Quarto e Cozinha)
+  - 1 Servo Motor simulando a movimentação física de um Portão de Garagem
+- **Lógica de Automação Local (Resiliente a quedas de Internet):**
+  - **Ar Condicionado:** Liga automaticamente se a temperatura for > 28°C e desliga se for < 26°C.
+  - **Luz da Sala:** Acende quando o ambiente escurece (LDR > 3000) e apaga quando clareia (LDR < 2500).
+  - **Luz do Quarto (Recepção):** Acende se o portão for aberto **E** houver detecção de presença **E** o ambiente estiver escuro (LDR > 3000). Apaga automaticamente após 30 segundos de inatividade.
+  - **Segurança da Cozinha (Gás):** Alerta sonoro/visual lógico disparado se a concentração ultrapassar o limite configurado (padrão 2000 PPM). Possui proteção de desarme manual caso o relé da cozinha seja desligado.
+- **Comunicação Bidirecional MQTT:** Publicação de telemetria dos sensores e escuta ativa para comandos remotos com persistência de mensagens (`retain=True`).
+- **Dashboard Remoto:** Interface gráfica no Node-RED para monitoramento analítico e controle manual dos relés e do portão.
 
-Arquivos principais
+## Arquivos Principais
 
-- [diagram.json](diagram.json) — Diagrama do sistema (Wokwi/diagrama)
-- [main.py](main.py) — Código principal do ESP32 (conexão Wi‑Fi, MQTT, loop de sensores)
-- [ssd1306.py](ssd1306.py) — Driver/rotinas para o display OLED (SSD1306)
-- [upload_manual.py](upload_manual.py) — Script auxiliar de upload (se aplicável)
-- [wokwi.toml](wokwi.toml) — Configuração para simulação no Wokwi
+- `diagram.json` — Configuração do layout físico, pinagem e conexões elétricas dos componentes no Wokwi.
+- `main.py` — Código-fonte principal do ESP32 (gerenciamento de rede, conexão HiveMQ Cloud, rotinas dos sensores e regras de automação).
+- `ssd1306.py` — Driver e biblioteca gráfica para controle do Display OLED via protocolo I2C.
+- `upload_manual.py` — Script utilitário em Python executado localmente na máquina de desenvolvimento para realizar o upload automatizado de arquivos para o sistema de arquivos do ESP32 simulado (via Raw REPL).
 
 Pré-requisitos
 
 - Visual Studio Code
   - Extensões recomendadas: Wokwi
 - Node.js e Node-RED
-- Conta/serviço de broker MQTT (HiveMQ público para testes: `broker.hivemq.com:1883`) ou broker próprio
-- Conta Google para configurar Google Sheets/API (se desejar persistência automática)
+- Conta/serviço de broker MQTT
+- Conta Google para configurar Google Sheets/API
 
 Como executar (simulação com Wokwi + VS Code)
 
@@ -63,7 +69,7 @@ python upload_manual.py main.py main.py rfc2217://localhost:4000
 Volte para o terminal Wokwi Diagram.json:
 Ctrl + B
 Ctrl + D
-Terminal normal para instalar mqtt:
+Use um Terminal normal para instalar o mqtt:
 ```
 pip install paho-mqtt
 ```
@@ -90,8 +96,30 @@ node-red
 Google Sheets (configuração resumida)
 
 - Crie um projeto no Google Cloud, habilite a Google Sheets API e gere credenciais (OAuth/Service Account) conforme o método escolhido.
-- Alternativa simples: crie um Google Apps Script que aceite requisições HTTP do Node-RED e escreva diretamente na planilha.
-
+```
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var dataHora = new Date();
+  
+  try {
+    var dados = JSON.parse(e.postData.contents);
+    
+    // Captura todos os 5 dados + evento
+    var evento = dados.evento || "Registro Automático";
+    var temp = dados.temperatura || "0";
+    var umid = dados.umidade || "0";
+    var luz = dados.luminosidade || "0";
+    var mov = dados.movimento || "0";
+    var gas = dados.gas || "0";
+    // Adiciona a linha com as 7 colunas (Data + Evento + 5 Sensores)
+    sheet.appendRow([dataHora, evento, temp, umid, luz, mov, gas]);
+    
+    return ContentService.createTextOutput("Sucesso: Todos os dados gravados");
+  } catch (erro) {
+    return ContentService.createTextOutput("Erro: " + erro.message);
+  }
+}
+```
 Notas sobre desenvolvimento local (hardware real)
 
 - Este projeto foi desenvolvido com o objetivo de testar diretamente pelo Visual Studio Code sem a necessidade de usar um ESP32 fisico.
