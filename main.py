@@ -84,7 +84,7 @@ def callback_mqtt(topic, msg):
         if msg == b"LIGAR": # Abrir
             servo.duty(115)
             client.publish(b"residencia/portao/status", b"ABRINDO", retain=True)
-        else: # Fechar
+        elif msg == b"FECHAR" or msg == b"DESLIGAR": # Fechar
             servo.duty(40)
             client.publish(b"residencia/portao/status", b"FECHANDO", retain=True)
 
@@ -112,6 +112,15 @@ client.subscribe(TOPIC_CMD_PORTAO)
 # 5. LOOP PRINCIPAL
 # ==========================================
 ultimo_envio = 0
+ultimo_movimento = 0
+luz_quarto_ligada = False
+
+def controlar_rele_e_publicar(rele, estado, topico_status, msg_ligado, msg_desligado):
+    """Controla o estado de um relé e publica a mudança no MQTT."""
+    if rele.value() != estado:
+        rele.value(estado)
+        client.publish(topico_status, msg_ligado if estado else msg_desligado, retain=True)
+        print(f"LOGICA: {topico_status.decode()} -> {'LIGADO' if estado else 'DESLIGADO'}")
 
 def web_page():
     return f"""<html><body><h2>Automação Local</h2>
@@ -146,6 +155,33 @@ try:
                 mov = sensor_pir.value()
                 status_portao = "FECHADO" if fim_curso.value() == 0 else "ABERTO"
                 
+                # ==========================================
+                # 6. LÓGICA DE AUTOMAÇÃO
+                # ==========================================
+                # --- Lógica do Ar Condicionado (Temperatura) ---
+                if temp > 28:
+                    controlar_rele_e_publicar(rele_ar, 1, b"residencia/ar/status", b"LIGADO", b"DESLIGADO")
+                elif temp < 26:
+                    controlar_rele_e_publicar(rele_ar, 0, b"residencia/ar/status", b"LIGADO", b"DESLIGADO")
+
+                # --- Lógica da Luz da Sala (Luminosidade) ---
+                if luz > 3000: # Escuro
+                    controlar_rele_e_publicar(rele_sala, 1, b"residencia/sala/status", b"LIGADO", b"DESLIGADO")
+                elif luz < 2500: # Claro
+                    controlar_rele_e_publicar(rele_sala, 0, b"residencia/sala/status", b"LIGADO", b"DESLIGADO")
+
+                # --- Lógica da Luz do Quarto (Movimento e Luminosidade) ---
+                if mov and luz > 3000:
+                    if not luz_quarto_ligada:
+                        controlar_rele_e_publicar(rele_quarto, 1, b"residencia/quarto/status", b"LIGADO", b"DESLIGADO")
+                        luz_quarto_ligada = True
+                    ultimo_movimento = agora
+                
+                if luz_quarto_ligada and (agora - ultimo_movimento > 30):
+                    controlar_rele_e_publicar(rele_quarto, 0, b"residencia/quarto/status", b"LIGADO", b"DESLIGADO")
+                    luz_quarto_ligada = False
+
+                # --- Publicação dos sensores ---
                 client.publish(b"residencia/sensores/temperatura", str(temp).encode())
                 client.publish(b"residencia/sensores/umidade", str(umid).encode())
                 client.publish(b"residencia/sensores/luminosidade", str(luz).encode())
