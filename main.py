@@ -25,15 +25,40 @@ sensor_dht = dht.DHT22(Pin(15))
 sensor_ldr = ADC(Pin(34))
 sensor_ldr.atten(ADC.ATTN_11DB)
 sensor_pir = Pin(13, Pin.IN)
+
 # Sensor de gás na cozinha (MQ2)
 sensor_gas = ADC(Pin(35))
 sensor_gas.atten(ADC.ATTN_11DB)
+try:
+    sensor_gas.width(ADC.WIDTH_12BIT)
+except Exception:
+    pass
+
+GAS_THRESHOLD = 2000
+GAS_PPM_MAX = 10000
+GAS_SAMPLES = 5
+gas_alert_enabled = True
+gas_alert_forcado_desligado = False
+
+def ler_media_adc(sensor, amostras=5):
+    total = 0
+    for _ in range(amostras):
+        total += sensor.read()
+        time.sleep(0.005)
+    return int(total / amostras)
+
+def converter_gas_para_ppm(raw):
+    # No Wokwi, mapeamos o valor cru (0-4095) diretamente para PPM (0-10000)
+    return int((raw / 4095.0) * GAS_PPM_MAX)
+
+def gas_em_alerta(ppm, limite_ppm):
+    return ppm > limite_ppm
 
 # Display OLED
 i2c = I2C(0, scl=Pin(22), sda=Pin(21))
 oled = ssd1306.SSD1306_I2C(128, 64, i2c)
 
-# Últimas leituras (usadas para atualizar OLED a partir de callbacks)
+# Últimas leituras globais
 last_temp = 0
 last_umid = 0
 last_luz = 0
@@ -45,17 +70,12 @@ PORTAO_TEMPO_MOVIMENTO = 3
 portao_movendo_ate = 0
 portao_estado_desejado = "FECHADO"
 
-# Controle do gás com histerese para evitar oscilação
-GAS_LIMIAR_LIGAR = 2500
-GAS_LIMIAR_DESLIGAR = 2200
-gas_alerta_ativo = False
-
 def atualizar_oled(temp, umid, luz, gas, status_portao):
     oled.fill(0)
     oled.text("ESTADO DA CASA", 0, 0)
     oled.text(f"Temp: {temp}C Umid:{umid}%", 0, 15)
     oled.text(f"Luz: {luz}", 0, 25)
-    oled.text(f"Gas: {gas}", 0, 35)
+    oled.text(f"Gas: {gas} ppm", 0, 35)
     oled.text(f"Portao: {status_portao}", 0, 45)
     oled.text("RELES: S A Q C", 0, 55)
     oled.show()
@@ -76,6 +96,7 @@ TOPICOS_CMD = {
     b"residencia/cozinha/comando": rele_cozinha
 }
 TOPIC_CMD_PORTAO = b"residencia/portao/comando"
+TOPIC_GAS_THRESHOLD_SET = b"residencia/gas/threshold/set"
 
 # ==========================================
 # 3. COMUNICAÇÃO E CALLBACKS
@@ -89,40 +110,46 @@ def conectar_wifi():
         pass
     print("Wi-Fi OK!")
 
-
 def atualizar_portao(estado, movimento):
-    """Atualiza servo, estado interno e tópicos do portão."""
     global last_status_portao, portao_movendo_ate, portao_estado_desejado
-
     if estado == "ABERTO":
         servo.duty(115)
     else:
         servo.duty(40)
-
     portao_estado_desejado = estado
     portao_movendo_ate = time.time() + PORTAO_TEMPO_MOVIMENTO
     last_status_portao = movimento
-
     client.publish(b"residencia/portao/status", movimento.encode(), retain=True)
     client.publish(b"residencia/sensores/portao", movimento.encode(), retain=True)
-    client.publish(b"residencia/sensores/fim_curso", movimento.encode(), retain=True)
 
 def callback_mqtt(topic, msg):
-    global last_status_portao, portao_movendo_ate, portao_estado_desejado
+    global last_status_portao, portao_movendo_ate, portao_estado_desejado, GAS_THRESHOLD, gas_alert_enabled, gas_alert_forcado_desligado
     print(f"Comando: {topic} -> {msg}")
 
-    # Suporta várias formas de payloads comuns (LIGAR/DESLIGAR, ABRIR/FECHAR, ON/OFF)
     if topic in TOPICOS_CMD:
         rele = TOPICOS_CMD[topic]
+        is_cozinha = topic == b"residencia/cozinha/comando"
         if msg in (b"LIGAR", b"ON", b"1", b"ABRIR"):
             rele.value(1)
+            if is_cozinha:
+                gas_alert_enabled = True
+                gas_alert_forcado_desligado = False
+                client.publish(b"residencia/gas/threshold", str(GAS_THRESHOLD).encode(), retain=True)
+                client.publish(b"residencia/sensores/gas_alerta", b"0", retain=True)
+                client.publish(b"residencia/cozinha/status", b"NORMAL", retain=True)
+                print("GAS reativado pela cozinha")
         else:
             rele.value(0)
-        # Publica com retain=True para garantir o estado persistente no Node-RED
+            if is_cozinha:
+                gas_alert_enabled = False
+                gas_alert_forcado_desligado = True
+                client.publish(b"residencia/gas/threshold", b"0", retain=True)
+                client.publish(b"residencia/sensores/gas_alerta", b"0", retain=True)
+                client.publish(b"residencia/cozinha/status", b"NORMAL", retain=True)
+                print("GAS desarmado pela cozinha")
         client.publish(topic.replace(b"comando", b"status"), b"LIGADO" if rele.value() else b"DESLIGADO", retain=True)
 
     elif topic == TOPIC_CMD_PORTAO:
-                # Porta: aceitaremos LIGAR/ABRIR/ON para abrir e FECHAR/DESLIGAR/OFF para fechar
         if msg in (b"LIGAR", b"ABRIR", b"ON", b"1"):
             atualizar_portao("ABERTO", "ABRINDO")
         elif msg in (b"FECHAR", b"DESLIGAR", b"OFF", b"0"):
@@ -130,6 +157,36 @@ def callback_mqtt(topic, msg):
         else:
             print("Payload do portão não reconhecido:", msg)
             return
+            
+    elif topic == TOPIC_GAS_THRESHOLD_SET:
+        try:
+            payload = msg.strip().upper()
+            if gas_alert_forcado_desligado and payload not in (b"1", b"ON", b"LIGAR", b"LIGADO", b"ALERTA"):
+                print("Ignorado update de threshold devido a desarme manual:", payload)
+                return
+
+            if payload in (b"0", b"OFF", b"DESLIGAR", b"DESLIGADO", b"NORMAL"):
+                gas_alert_enabled = False
+                gas_alert_forcado_desligado = True
+                client.publish(b"residencia/gas/threshold", b"0", retain=True)
+                client.publish(b"residencia/cozinha/status", b"NORMAL", retain=True)
+                client.publish(b"residencia/sensores/gas_alerta", b"0", retain=True)
+                print("GAS alert disabled")
+            elif payload in (b"1", b"ON", b"LIGAR", b"LIGADO", b"ALERTA"):
+                gas_alert_enabled = True
+                gas_alert_forcado_desligado = False
+                client.publish(b"residencia/gas/threshold", str(GAS_THRESHOLD).encode(), retain=True)
+                print("GAS alert enabled with threshold", GAS_THRESHOLD)
+            else:
+                v = int(payload)
+                GAS_THRESHOLD = v
+                gas_alert_enabled = True
+                gas_alert_forcado_desligado = False
+                print("GAS_THRESHOLD set to", GAS_THRESHOLD)
+                client.publish(b"residencia/gas/threshold", str(GAS_THRESHOLD).encode(), retain=True)
+        except Exception as e:
+            print("Failed to set GAS_THRESHOLD:", e)
+        return
 
 # ==========================================
 # 4. INICIALIZAÇÃO
@@ -150,16 +207,17 @@ client.connect()
 for topico in TOPICOS_CMD.keys():
     client.subscribe(topico)
 client.subscribe(TOPIC_CMD_PORTAO)
+client.subscribe(TOPIC_GAS_THRESHOLD_SET)
 
 # ==========================================
 # 5. LOOP PRINCIPAL
 # ==========================================
 ultimo_envio = 0
+ultimo_envio_gas = 0 # <-- Variável nova para o timer do gás
 ultimo_movimento = 0
 luz_quarto_ligada = False
 
 def controlar_rele_e_publicar(rele, estado, topico_status, msg_ligado, msg_desligado):
-    """Controla o estado de um relé e publica a mudança no MQTT."""
     if rele.value() != estado:
         rele.value(estado)
         client.publish(topico_status, msg_ligado if estado else msg_desligado, retain=True)
@@ -190,36 +248,57 @@ try:
             pass 
         
         agora = time.time()
-        if agora - ultimo_envio >= 5:
+        
+        # ==========================================
+        # TIMER DO GÁS (A cada 5 segundos)
+        # ==========================================
+        if agora - ultimo_envio_gas >= 5:
+            try:
+                gas_raw = ler_media_adc(sensor_gas, GAS_SAMPLES)
+                last_gas = converter_gas_para_ppm(gas_raw)
+                
+                print("GAS RAW:", gas_raw, "GAS PPM:", last_gas)
+                client.publish(b"residencia/sensores/gas_raw", str(gas_raw).encode(), retain=True)
+                client.publish(b"residencia/sensores/gas", str(last_gas).encode(), retain=True)
+                
+                alerta_gas = gas_em_alerta(last_gas, GAS_THRESHOLD)
+                
+                if not gas_alert_enabled or gas_alert_forcado_desligado:
+                    alerta_gas = False
+                    
+                client.publish(b"residencia/sensores/gas_alerta", b"1" if alerta_gas else b"0", retain=True)
+                client.publish(b"residencia/cozinha/status", b"ALERTA_GAS" if alerta_gas else b"NORMAL", retain=True)
+                
+                ultimo_envio_gas = agora
+            except Exception:
+                pass
+
+        # ==========================================
+        # TIMER GERAL (A cada 1 segundo)
+        # ==========================================
+        if agora - ultimo_envio >= 1:
             try:
                 sensor_dht.measure()
                 temp, umid = sensor_dht.temperature(), sensor_dht.humidity()
                 luz = sensor_ldr.read()
-                gas = sensor_gas.read()
-                mov = sensor_pir.value()
-                # Atualiza as últimas leituras globais (para uso por callbacks)
-                last_temp = temp
-                last_umid = umid
-                last_luz = luz
-                last_gas = gas
                 
-                # ==========================================
-                # 6. LÓGICA DE AUTOMAÇÃO
-                # ==========================================
-                # --- Lógica do Ar Condicionado (Temperatura) ---
+                portao_aberto = last_status_portao == "ABERTO"
+                mov = sensor_pir.value() 
+                
+                last_temp, last_umid, last_luz = temp, umid, luz
+                
+                # --- LÓGICA DE AUTOMAÇÃO ---
                 if temp > 28:
                     controlar_rele_e_publicar(rele_ar, 1, b"residencia/ar/status", b"LIGADO", b"DESLIGADO")
                 elif temp < 26:
                     controlar_rele_e_publicar(rele_ar, 0, b"residencia/ar/status", b"LIGADO", b"DESLIGADO")
 
-                # --- Lógica da Luz da Sala (Luminosidade) ---
-                if luz > 3000: # Escuro
+                if luz > 3000: 
                     controlar_rele_e_publicar(rele_sala, 1, b"residencia/sala/status", b"LIGADO", b"DESLIGADO")
-                elif luz < 2500: # Claro
+                elif luz < 2500: 
                     controlar_rele_e_publicar(rele_sala, 0, b"residencia/sala/status", b"LIGADO", b"DESLIGADO")
 
-                # --- Lógica da Luz do Quarto (Movimento e Luminosidade) ---
-                if mov and luz > 3000:
+                if portao_aberto and mov and luz > 3000:
                     if not luz_quarto_ligada:
                         controlar_rele_e_publicar(rele_quarto, 1, b"residencia/quarto/status", b"LIGADO", b"DESLIGADO")
                         luz_quarto_ligada = True
@@ -229,37 +308,21 @@ try:
                     controlar_rele_e_publicar(rele_quarto, 0, b"residencia/quarto/status", b"LIGADO", b"DESLIGADO")
                     luz_quarto_ligada = False
 
-                # --- Lógica do gás na cozinha ---
-                # Liga acima de GAS_LIMIAR_LIGAR e desliga abaixo de GAS_LIMIAR_DESLIGAR.
-                if (not gas_alerta_ativo) and gas >= GAS_LIMIAR_LIGAR:
-                    gas_alerta_ativo = True
-                elif gas_alerta_ativo and gas <= GAS_LIMIAR_DESLIGAR:
-                    gas_alerta_ativo = False
-
-                gas_alerta = 1 if gas_alerta_ativo else 0
-                client.publish(b"residencia/sensores/gas", str(gas).encode())
-                client.publish(b"residencia/sensores/gas_alerta", str(gas_alerta).encode(), retain=True)
-                client.publish(
-                    b"residencia/cozinha/status",
-                    b"ALERTA_GAS" if gas_alerta else b"NORMAL",
-                    retain=True,
-                )
-
-                # Finaliza o movimento do portão após o tempo definido
+                # --- Finaliza portão ---
                 if portao_movendo_ate and agora >= portao_movendo_ate:
                     last_status_portao = portao_estado_desejado
                     client.publish(b"residencia/portao/status", last_status_portao.encode(), retain=True)
                     client.publish(b"residencia/sensores/portao", last_status_portao.encode(), retain=True)
-                    client.publish(b"residencia/sensores/fim_curso", last_status_portao.encode(), retain=True)
                     portao_movendo_ate = 0
 
-                # --- Publicação dos sensores ---
+                # --- Envio Sensores MQTT ---
                 client.publish(b"residencia/sensores/temperatura", str(temp).encode())
                 client.publish(b"residencia/sensores/umidade", str(umid).encode())
                 client.publish(b"residencia/sensores/luminosidade", str(luz).encode())
                 client.publish(b"residencia/sensores/movimento", str(mov).encode())
                 
-                atualizar_oled(temp, umid, luz, gas, last_status_portao)
+                # A tela OLED atualiza a cada 1 seg, pegando o último valor salvo do gás (last_gas)
+                atualizar_oled(temp, umid, luz, last_gas, last_status_portao)
                 ultimo_envio = agora
             except Exception:
                 pass

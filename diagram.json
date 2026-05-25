@@ -16,16 +16,16 @@
     {
       "type": "wokwi-gas-sensor",
       "id": "gas1",
-      "top": 214.4,
-      "left": -30.4,
-      "attrs": { "ppm": "400", "threshold": "4.4" }
+      "top": 309.9,
+      "left": -146.6,
+      "attrs": { "ppm": "400" }
     },
     { "type": "wokwi-relay-module", "id": "relay1", "top": -150, "left": 250, "attrs": {} },
     { "type": "wokwi-relay-module", "id": "relay2", "top": -50, "left": 250, "attrs": {} },
     { "type": "wokwi-relay-module", "id": "relay3", "top": 50, "left": 250, "attrs": {} },
     { "type": "wokwi-relay-module", "id": "relay4", "top": 150, "left": 250, "attrs": {} },
     { "type": "wokwi-servo", "id": "servo1", "top": -251.6, "left": 28.8, "attrs": {} },
-    { "type": "wokwi-ssd1306", "id": "oled1", "top": 227.5, "left": 49.9, "attrs": {} },
+    { "type": "wokwi-ssd1306", "id": "oled1", "top": 237.1, "left": 49.9, "attrs": {} },
     {
       "type": "wokwi-text",
       "id": "text1",
@@ -57,9 +57,9 @@
     {
       "type": "wokwi-text",
       "id": "text5",
-      "top": -182.4,
+      "top": -172.8,
       "left": 28.8,
-      "attrs": { "text": "Portao" }
+      "attrs": { "text": "Portao(Motor)" }
     },
     {
       "type": "wokwi-text",
@@ -85,9 +85,9 @@
     {
       "type": "wokwi-text",
       "id": "text9",
-      "top": 182.4,
-      "left": -49.6,
-      "attrs": { "text": "Gas" }
+      "top": 374.4,
+      "left": -134.4,
+      "attrs": { "text": "Sensor Gas" }
     }
   ],
   "connections": [
@@ -103,7 +103,7 @@
     [ "pir1:GND", "esp:GND.1", "black", [ "v-19.2", "h177.15" ] ],
     [ "pir1:OUT", "esp:13", "green", [ "v9.6", "h186.87" ] ],
     [ "gas1:GND", "esp:GND.1", "black", [ "h-19.2", "v57.6" ] ],
-    [ "gas1:VCC", "esp:5V", "red", [ "h19.2", "v57.6" ] ],
+    [ "gas1:VCC", "esp:3V3", "red", [ "h-48", "v-346.5" ] ],
     [ "gas1:AO", "esp:35", "green", [ "h38.4", "v57.6" ] ],
     [ "relay1:VCC", "esp:5V", "red", [ "h-48.4", "v342.2", "h-196.99" ] ],
     [ "relay1:GND", "esp:GND.2", "yellow", [ "h-38.8", "v149.8" ] ],
