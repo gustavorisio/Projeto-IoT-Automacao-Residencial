@@ -11,7 +11,8 @@ Resumo
 
 ## Funcionalidades Implementadas
 
-- **Leitura de 4 Sensores:** - Temperatura e Umidade (**DHT22**)
+- **Leitura de 4 Sensores:**
+  - Temperatura e Umidade (**DHT22**)
   - Luminosidade (**LDR** via conversor ADC de 11dB)
   - Presença/Movimento (**PIR**)
   - Concentração de Gás/Fumaça (**MQ2** com amostragem por média e conversão para PPM)
