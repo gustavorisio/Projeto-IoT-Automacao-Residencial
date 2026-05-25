@@ -25,21 +25,39 @@ sensor_dht = dht.DHT22(Pin(15))
 sensor_ldr = ADC(Pin(34))
 sensor_ldr.atten(ADC.ATTN_11DB)
 sensor_pir = Pin(13, Pin.IN)
-# Sensor Fim de Curso
-fim_curso = Pin(12, Pin.IN, Pin.PULL_UP) 
+# Sensor de gás na cozinha (MQ2)
+sensor_gas = ADC(Pin(35))
+sensor_gas.atten(ADC.ATTN_11DB)
 
 # Display OLED
 i2c = I2C(0, scl=Pin(22), sda=Pin(21))
 oled = ssd1306.SSD1306_I2C(128, 64, i2c)
 
-def atualizar_oled(temp, umid, luz, status_portao):
+# Últimas leituras (usadas para atualizar OLED a partir de callbacks)
+last_temp = 0
+last_umid = 0
+last_luz = 0
+last_gas = 0
+last_status_portao = "FECHADO"
+
+# Controle do movimento do portão
+PORTAO_TEMPO_MOVIMENTO = 3
+portao_movendo_ate = 0
+portao_estado_desejado = "FECHADO"
+
+# Controle do gás com histerese para evitar oscilação
+GAS_LIMIAR_LIGAR = 2500
+GAS_LIMIAR_DESLIGAR = 2200
+gas_alerta_ativo = False
+
+def atualizar_oled(temp, umid, luz, gas, status_portao):
     oled.fill(0)
     oled.text("ESTADO DA CASA", 0, 0)
     oled.text(f"Temp: {temp}C Umid:{umid}%", 0, 15)
     oled.text(f"Luz: {luz}", 0, 25)
-    oled.text(f"Portao: {status_portao}", 0, 35)
-    oled.text("RELES: S A Q C", 0, 45)
-    oled.text(f"       {rele_sala.value()} {rele_ar.value()} {rele_quarto.value()} {rele_cozinha.value()}", 0, 55)
+    oled.text(f"Gas: {gas}", 0, 35)
+    oled.text(f"Portao: {status_portao}", 0, 45)
+    oled.text("RELES: S A Q C", 0, 55)
     oled.show()
 
 # ==========================================
@@ -71,22 +89,47 @@ def conectar_wifi():
         pass
     print("Wi-Fi OK!")
 
+
+def atualizar_portao(estado, movimento):
+    """Atualiza servo, estado interno e tópicos do portão."""
+    global last_status_portao, portao_movendo_ate, portao_estado_desejado
+
+    if estado == "ABERTO":
+        servo.duty(115)
+    else:
+        servo.duty(40)
+
+    portao_estado_desejado = estado
+    portao_movendo_ate = time.time() + PORTAO_TEMPO_MOVIMENTO
+    last_status_portao = movimento
+
+    client.publish(b"residencia/portao/status", movimento.encode(), retain=True)
+    client.publish(b"residencia/sensores/portao", movimento.encode(), retain=True)
+    client.publish(b"residencia/sensores/fim_curso", movimento.encode(), retain=True)
+
 def callback_mqtt(topic, msg):
+    global last_status_portao, portao_movendo_ate, portao_estado_desejado
     print(f"Comando: {topic} -> {msg}")
-    
+
+    # Suporta várias formas de payloads comuns (LIGAR/DESLIGAR, ABRIR/FECHAR, ON/OFF)
     if topic in TOPICOS_CMD:
         rele = TOPICOS_CMD[topic]
-        rele.value(1 if msg == b"LIGAR" else 0)
+        if msg in (b"LIGAR", b"ON", b"1", b"ABRIR"):
+            rele.value(1)
+        else:
+            rele.value(0)
         # Publica com retain=True para garantir o estado persistente no Node-RED
         client.publish(topic.replace(b"comando", b"status"), b"LIGADO" if rele.value() else b"DESLIGADO", retain=True)
-        
+
     elif topic == TOPIC_CMD_PORTAO:
-        if msg == b"LIGAR": # Abrir
-            servo.duty(115)
-            client.publish(b"residencia/portao/status", b"ABRINDO", retain=True)
-        elif msg == b"FECHAR" or msg == b"DESLIGAR": # Fechar
-            servo.duty(40)
-            client.publish(b"residencia/portao/status", b"FECHANDO", retain=True)
+                # Porta: aceitaremos LIGAR/ABRIR/ON para abrir e FECHAR/DESLIGAR/OFF para fechar
+        if msg in (b"LIGAR", b"ABRIR", b"ON", b"1"):
+            atualizar_portao("ABERTO", "ABRINDO")
+        elif msg in (b"FECHAR", b"DESLIGAR", b"OFF", b"0"):
+            atualizar_portao("FECHADO", "FECHANDO")
+        else:
+            print("Payload do portão não reconhecido:", msg)
+            return
 
 # ==========================================
 # 4. INICIALIZAÇÃO
@@ -139,8 +182,8 @@ try:
             req = conn.recv(1024).decode()
             if '/sala/on' in req: rele_sala.value(1)
             elif '/sala/off' in req: rele_sala.value(0)
-            elif '/portao/on' in req: servo.duty(115)
-            elif '/portao/off' in req: servo.duty(40)
+            elif '/portao/on' in req: atualizar_portao("ABERTO", "ABRINDO")
+            elif '/portao/off' in req: atualizar_portao("FECHADO", "FECHANDO")
             conn.send('HTTP/1.1 200 OK\nContent-Type: text/html\n\n' + web_page())
             conn.close()
         except OSError:
@@ -152,8 +195,13 @@ try:
                 sensor_dht.measure()
                 temp, umid = sensor_dht.temperature(), sensor_dht.humidity()
                 luz = sensor_ldr.read()
+                gas = sensor_gas.read()
                 mov = sensor_pir.value()
-                status_portao = "FECHADO" if fim_curso.value() == 0 else "ABERTO"
+                # Atualiza as últimas leituras globais (para uso por callbacks)
+                last_temp = temp
+                last_umid = umid
+                last_luz = luz
+                last_gas = gas
                 
                 # ==========================================
                 # 6. LÓGICA DE AUTOMAÇÃO
@@ -181,14 +229,37 @@ try:
                     controlar_rele_e_publicar(rele_quarto, 0, b"residencia/quarto/status", b"LIGADO", b"DESLIGADO")
                     luz_quarto_ligada = False
 
+                # --- Lógica do gás na cozinha ---
+                # Liga acima de GAS_LIMIAR_LIGAR e desliga abaixo de GAS_LIMIAR_DESLIGAR.
+                if (not gas_alerta_ativo) and gas >= GAS_LIMIAR_LIGAR:
+                    gas_alerta_ativo = True
+                elif gas_alerta_ativo and gas <= GAS_LIMIAR_DESLIGAR:
+                    gas_alerta_ativo = False
+
+                gas_alerta = 1 if gas_alerta_ativo else 0
+                client.publish(b"residencia/sensores/gas", str(gas).encode())
+                client.publish(b"residencia/sensores/gas_alerta", str(gas_alerta).encode(), retain=True)
+                client.publish(
+                    b"residencia/cozinha/status",
+                    b"ALERTA_GAS" if gas_alerta else b"NORMAL",
+                    retain=True,
+                )
+
+                # Finaliza o movimento do portão após o tempo definido
+                if portao_movendo_ate and agora >= portao_movendo_ate:
+                    last_status_portao = portao_estado_desejado
+                    client.publish(b"residencia/portao/status", last_status_portao.encode(), retain=True)
+                    client.publish(b"residencia/sensores/portao", last_status_portao.encode(), retain=True)
+                    client.publish(b"residencia/sensores/fim_curso", last_status_portao.encode(), retain=True)
+                    portao_movendo_ate = 0
+
                 # --- Publicação dos sensores ---
                 client.publish(b"residencia/sensores/temperatura", str(temp).encode())
                 client.publish(b"residencia/sensores/umidade", str(umid).encode())
                 client.publish(b"residencia/sensores/luminosidade", str(luz).encode())
                 client.publish(b"residencia/sensores/movimento", str(mov).encode())
-                client.publish(b"residencia/sensores/fim_curso", status_portao.encode(), retain=True)
                 
-                atualizar_oled(temp, umid, luz, status_portao)
+                atualizar_oled(temp, umid, luz, gas, last_status_portao)
                 ultimo_envio = agora
             except Exception:
                 pass
