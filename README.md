@@ -1,10 +1,11 @@
 Este repositório contém meu projeto individual de automação residencial usando ESP32 programado em MicroPython utilizando Visual Studio Code, integração MQTT e dashboard em Node-RED.
 
-Resumo
+## Resumo
 
 - **Dispositivo:** ESP32 rodando MicroPython (simulado via Wokwi no VS Code)
 - **Comunicação:** MQTT Seguro (HiveMQ Cloud via TLS/SSL na porta 8883)
-- **Orquestração/Visualização:** Node-RED (Dashboard em tempo real)
+- **Interface Externa:** Aplicação Web em Flask (Dashboard customizado e interativo)
+- **Orquestração/Visualização:** Node-RED (Dashboard em tempo real e orquestração na nuvem)
 - **Interface Embarcada:** Página Web local (servida via Socket na porta 80) + Display OLED (SSD1306 via I2C)
 - **Persistência de Dados:** Registro histórico de sensores no Google Sheets a cada 2 horas (via Node-RED)
 - **Notificações:** Envio de e-mail automático em caso de alertas críticos de segurança (vazamento de gás)
@@ -16,15 +17,14 @@ Resumo
   - Luminosidade (**LDR** via conversor ADC de 11dB)
   - Presença/Movimento (**PIR**)
   - Concentração de Gás/Fumaça (**MQ2** com amostragem por média e conversão para PPM)
-- **Controle de Atuadores:** - 4 Relés simulando cargas residenciais (Sala, Ar Condicionado, Quarto e Cozinha)
-  - 1 Servo Motor simulando a movimentação física de um Portão de Garagem
+- **Controle de Atuadores:**
+  - 4 Relés simulando cargas residenciais e atuação mecânica (Sala, Ar Condicionado, Cozinha e Portão)
+  - 1 Servo Motor simulando a movimentação física de um Portão de Garagem (sincronizado com o relé do portão)
 - **Lógica de Automação Local (Resiliente a quedas de Internet):**
   - **Ar Condicionado:** Liga automaticamente se a temperatura for > 28°C e desliga se for < 26°C.
   - **Luz da Sala:** Acende quando o ambiente escurece (LDR > 3000) e apaga quando clareia (LDR < 2500).
-  - **Luz do Quarto (Recepção):** Acende se o portão for aberto **E** houver detecção de presença **E** o ambiente estiver escuro (LDR > 3000). Apaga automaticamente após 30 segundos de inatividade.
-  - **Segurança da Cozinha (Gás):** Alerta sonoro/visual lógico disparado se a concentração ultrapassar o limite configurado (padrão 2000 PPM). Possui proteção de desarme manual caso o relé da cozinha seja desligado.
-- **Comunicação Bidirecional MQTT:** Publicação de telemetria dos sensores e escuta ativa para comandos remotos com persistência de mensagens (`retain=True`).
-- **Dashboard Remoto:** Interface gráfica no Node-RED para monitoramento analítico e controle manual dos relés e do portão.
+  - **Segurança da Cozinha (Gás):** Alerta disparado se a concentração ultrapassar o limite configurado (padrão 2000 PPM). Possui proteção onde o monitoramento e o limite de acionamento (threshold) podem ser alterados ou desativados remotamente via interface Flask ou MQTT.
+- **Comunicação Bidirecional MQTT:** Publicação de telemetria dos sensores e escuta activa para comandos remotos com persistência de mensagens (`retain=True`).
 
 ## Arquivos Principais
 
@@ -32,16 +32,19 @@ Resumo
 - `main.py` — Código-fonte principal do ESP32 (gerenciamento de rede, conexão HiveMQ Cloud, rotinas dos sensores e regras de automação).
 - `ssd1306.py` — Driver e biblioteca gráfica para controle do Display OLED via protocolo I2C.
 - `upload_manual.py` — Script utilitário em Python executado localmente na máquina de desenvolvimento para realizar o upload automatizado de arquivos para o sistema de arquivos do ESP32 simulado (via Raw REPL).
+- `app.py` — Backend em Python (Flask) responsável por renderizar a interface web externa e interagir com o broker MQTT.
+- `index.html` e `style.css` — Arquivos de frontend da aplicação Flask, exibindo um painel responsivo com atualização de estado em tempo real.
 
-Pré-requisitos
+## Pré-requisitos
 
 - Visual Studio Code
   - Extensões recomendadas: Wokwi
+- Python 3.x (para rodar a interface Flask e scripts de upload)
 - Node.js e Node-RED
-- Conta/serviço de broker MQTT
+- Conta/serviço de broker MQTT (HiveMQ Cloud)
 - Conta Google para configurar Google Sheets/API
 
-Como executar (simulação com Wokwi + VS Code)
+## Como executar (simulação com Wokwi + VS Code e Flask)
 
 1. Clone o repositório:
 
@@ -121,6 +124,16 @@ function doPost(e) {
   }
 }
 ```
+3. Flask web:
+no terminal, dentro de PROJETO IOT - AUTOMACAO RESIDENCIAL digite:
+```
+cd .\flask_web\
+```
+Apos isso inicie o flask web:
+```
+python app.py
+```
+
 Notas sobre desenvolvimento local (hardware real)
 
 - Este projeto foi desenvolvido com o objetivo de testar diretamente pelo Visual Studio Code sem a necessidade de usar um ESP32 fisico.
@@ -134,6 +147,8 @@ Boas práticas e justificativas técnicas
 Entrega
 
 - Gravei um vídeo demonstrando a simulação no Wokwi, a integração MQTT e o dashboard do Node-RED.
+  Video no Youtube: https://www.youtube.com/watch?v=e15WSmF2Ams
+  
 - Todo o código fonte está neste repositório; veja `main.py` e `ssd1306.py` para pontos de integração.
 
 Abra uma issue no repositório ou entre em contato pelo GitHub.
