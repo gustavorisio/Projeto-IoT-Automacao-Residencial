@@ -9,14 +9,13 @@ import ssd1306
 # ==========================================
 # 1. CONFIGURAÇÃO DE HARDWARE
 # ==========================================
-# 4 Relés + Servo
+# 3 Relés + Servo
 rele_sala = Pin(2, Pin.OUT)
 rele_ar = Pin(4, Pin.OUT)
-rele_quarto = Pin(5, Pin.OUT)
 rele_cozinha = Pin(19, Pin.OUT)
 servo = PWM(Pin(18), freq=50)
 
-for rele in (rele_sala, rele_ar, rele_quarto, rele_cozinha):
+for rele in (rele_sala, rele_ar, rele_cozinha):
     rele.value(0)
 servo.duty(40) # Portão inicia fechado
 
@@ -38,7 +37,6 @@ GAS_THRESHOLD = 2000
 GAS_PPM_MAX = 10000
 GAS_SAMPLES = 5
 gas_alert_enabled = True
-gas_alert_forcado_desligado = False
 
 def ler_media_adc(sensor, amostras=5):
     total = 0
@@ -59,25 +57,23 @@ i2c = I2C(0, scl=Pin(22), sda=Pin(21))
 oled = ssd1306.SSD1306_I2C(128, 64, i2c)
 
 # Últimas leituras globais
-last_temp = 0
-last_umid = 0
-last_luz = 0
 last_gas = 0
 last_status_portao = "FECHADO"
+last_status_gas = "NORMAL"
 
 # Controle do movimento do portão
 PORTAO_TEMPO_MOVIMENTO = 3
 portao_movendo_ate = 0
 portao_estado_desejado = "FECHADO"
 
-def atualizar_oled(temp, umid, luz, gas, status_portao):
+def atualizar_oled(temp, umid, luz, gas, status_gas, status_portao):
     oled.fill(0)
     oled.text("ESTADO DA CASA", 0, 0)
     oled.text(f"Temp: {temp}C Umid:{umid}%", 0, 15)
     oled.text(f"Luz: {luz}", 0, 25)
-    oled.text(f"Gas: {gas} ppm", 0, 35)
+    oled.text(f"Gas: {status_gas}", 0, 35)
     oled.text(f"Portao: {status_portao}", 0, 45)
-    oled.text("RELES: S A Q C", 0, 55)
+    oled.text("RELES: S A C", 0, 55)
     oled.show()
 
 # ==========================================
@@ -92,7 +88,6 @@ MQTT_PASSWORD = b"Teste@123"
 TOPICOS_CMD = {
     b"residencia/sala/comando": rele_sala,
     b"residencia/ar/comando": rele_ar,
-    b"residencia/quarto/comando": rele_quarto,
     b"residencia/cozinha/comando": rele_cozinha
 }
 TOPIC_CMD_PORTAO = b"residencia/portao/comando"
@@ -123,30 +118,15 @@ def atualizar_portao(estado, movimento):
     client.publish(b"residencia/sensores/portao", movimento.encode(), retain=True)
 
 def callback_mqtt(topic, msg):
-    global last_status_portao, portao_movendo_ate, portao_estado_desejado, GAS_THRESHOLD, gas_alert_enabled, gas_alert_forcado_desligado
+    global last_status_portao, portao_movendo_ate, portao_estado_desejado, GAS_THRESHOLD, gas_alert_enabled
     print(f"Comando: {topic} -> {msg}")
 
     if topic in TOPICOS_CMD:
         rele = TOPICOS_CMD[topic]
-        is_cozinha = topic == b"residencia/cozinha/comando"
         if msg in (b"LIGAR", b"ON", b"1", b"ABRIR"):
             rele.value(1)
-            if is_cozinha:
-                gas_alert_enabled = True
-                gas_alert_forcado_desligado = False
-                client.publish(b"residencia/gas/threshold", str(GAS_THRESHOLD).encode(), retain=True)
-                client.publish(b"residencia/sensores/gas_alerta", b"0", retain=True)
-                client.publish(b"residencia/cozinha/status", b"NORMAL", retain=True)
-                print("GAS reativado pela cozinha")
         else:
             rele.value(0)
-            if is_cozinha:
-                gas_alert_enabled = False
-                gas_alert_forcado_desligado = True
-                client.publish(b"residencia/gas/threshold", b"0", retain=True)
-                client.publish(b"residencia/sensores/gas_alerta", b"0", retain=True)
-                client.publish(b"residencia/cozinha/status", b"NORMAL", retain=True)
-                print("GAS desarmado pela cozinha")
         client.publish(topic.replace(b"comando", b"status"), b"LIGADO" if rele.value() else b"DESLIGADO", retain=True)
 
     elif topic == TOPIC_CMD_PORTAO:
@@ -161,27 +141,19 @@ def callback_mqtt(topic, msg):
     elif topic == TOPIC_GAS_THRESHOLD_SET:
         try:
             payload = msg.strip().upper()
-            if gas_alert_forcado_desligado and payload not in (b"1", b"ON", b"LIGAR", b"LIGADO", b"ALERTA"):
-                print("Ignorado update de threshold devido a desarme manual:", payload)
-                return
-
             if payload in (b"0", b"OFF", b"DESLIGAR", b"DESLIGADO", b"NORMAL"):
                 gas_alert_enabled = False
-                gas_alert_forcado_desligado = True
                 client.publish(b"residencia/gas/threshold", b"0", retain=True)
-                client.publish(b"residencia/cozinha/status", b"NORMAL", retain=True)
                 client.publish(b"residencia/sensores/gas_alerta", b"0", retain=True)
                 print("GAS alert disabled")
             elif payload in (b"1", b"ON", b"LIGAR", b"LIGADO", b"ALERTA"):
                 gas_alert_enabled = True
-                gas_alert_forcado_desligado = False
                 client.publish(b"residencia/gas/threshold", str(GAS_THRESHOLD).encode(), retain=True)
                 print("GAS alert enabled with threshold", GAS_THRESHOLD)
             else:
                 v = int(payload)
                 GAS_THRESHOLD = v
                 gas_alert_enabled = True
-                gas_alert_forcado_desligado = False
                 print("GAS_THRESHOLD set to", GAS_THRESHOLD)
                 client.publish(b"residencia/gas/threshold", str(GAS_THRESHOLD).encode(), retain=True)
         except Exception as e:
@@ -214,8 +186,6 @@ client.subscribe(TOPIC_GAS_THRESHOLD_SET)
 # ==========================================
 ultimo_envio = 0
 ultimo_envio_gas = 0 # <-- Variável nova para o timer do gás
-ultimo_movimento = 0
-luz_quarto_ligada = False
 
 def controlar_rele_e_publicar(rele, estado, topico_status, msg_ligado, msg_desligado):
     if rele.value() != estado:
@@ -227,7 +197,6 @@ def web_page():
     return f"""<html><body><h2>Automação Local</h2>
     <p>Sala: {rele_sala.value()} <a href="/sala/on">Ligar</a> <a href="/sala/off">Desligar</a></p>
     <p>Ar: {rele_ar.value()} <a href="/ar/on">Ligar</a> <a href="/ar/off">Desligar</a></p>
-    <p>Quarto: {rele_quarto.value()} <a href="/quarto/on">Ligar</a> <a href="/quarto/off">Desligar</a></p>
     <p>Cozinha: {rele_cozinha.value()} <a href="/cozinha/on">Ligar</a> <a href="/cozinha/off">Desligar</a></p>
     <p>Portão: <a href="/portao/on">Abrir</a> <a href="/portao/off">Fechar</a></p>
     </body></html>"""
@@ -262,9 +231,9 @@ try:
                 client.publish(b"residencia/sensores/gas", str(last_gas).encode(), retain=True)
                 
                 alerta_gas = gas_em_alerta(last_gas, GAS_THRESHOLD)
-                
-                if not gas_alert_enabled or gas_alert_forcado_desligado:
+                if not gas_alert_enabled:
                     alerta_gas = False
+                last_status_gas = "ALERTA" if alerta_gas else "NORMAL"
                     
                 client.publish(b"residencia/sensores/gas_alerta", b"1" if alerta_gas else b"0", retain=True)
                 client.publish(b"residencia/cozinha/status", b"ALERTA_GAS" if alerta_gas else b"NORMAL", retain=True)
@@ -282,10 +251,7 @@ try:
                 temp, umid = sensor_dht.temperature(), sensor_dht.humidity()
                 luz = sensor_ldr.read()
                 
-                portao_aberto = last_status_portao == "ABERTO"
                 mov = sensor_pir.value() 
-                
-                last_temp, last_umid, last_luz = temp, umid, luz
                 
                 # --- LÓGICA DE AUTOMAÇÃO ---
                 if temp > 28:
@@ -297,16 +263,6 @@ try:
                     controlar_rele_e_publicar(rele_sala, 1, b"residencia/sala/status", b"LIGADO", b"DESLIGADO")
                 elif luz < 2500: 
                     controlar_rele_e_publicar(rele_sala, 0, b"residencia/sala/status", b"LIGADO", b"DESLIGADO")
-
-                if portao_aberto and mov and luz > 3000:
-                    if not luz_quarto_ligada:
-                        controlar_rele_e_publicar(rele_quarto, 1, b"residencia/quarto/status", b"LIGADO", b"DESLIGADO")
-                        luz_quarto_ligada = True
-                    ultimo_movimento = agora
-                
-                if luz_quarto_ligada and (agora - ultimo_movimento > 30):
-                    controlar_rele_e_publicar(rele_quarto, 0, b"residencia/quarto/status", b"LIGADO", b"DESLIGADO")
-                    luz_quarto_ligada = False
 
                 # --- Finaliza portão ---
                 if portao_movendo_ate and agora >= portao_movendo_ate:
@@ -322,7 +278,7 @@ try:
                 client.publish(b"residencia/sensores/movimento", str(mov).encode())
                 
                 # A tela OLED atualiza a cada 1 seg, pegando o último valor salvo do gás (last_gas)
-                atualizar_oled(temp, umid, luz, last_gas, last_status_portao)
+                atualizar_oled(temp, umid, luz, last_gas, last_status_gas, last_status_portao)
                 ultimo_envio = agora
             except Exception:
                 pass
