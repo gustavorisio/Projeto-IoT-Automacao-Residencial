@@ -16,9 +16,9 @@
       </div>
       <div class="hero-panel">
         <span>Temperatura</span>
-        <strong>{{ view.temperatura }} C</strong>
+        <strong id="temp-value">{{ view.temperatura }} C</strong>
         <span>Umidade</span>
-        <strong>{{ view.umidade }} %</strong>
+        <strong id="umid-value">{{ view.umidade }} %</strong>
       </div>
     </section>
 
@@ -37,7 +37,7 @@
         <article class="card">
           <div class="card-head">
             <h2>{{ card.label }}</h2>
-            <span class="status {{ 'on' if card.is_on else 'off' }}">{{ card.status }}</span>
+            <span id="status-{{ card.key }}" class="status {{ 'on' if card.is_on else 'off' }}">{{ card.status }}</span>
           </div>
           <p class="meta">Tema MQTT: {{ card.status_topic }}</p>
           <div class="actions">
@@ -56,7 +56,7 @@
       <article class="card wide">
         <div class="card-head">
           <h2>Portao</h2>
-          <span class="status">{{ view.portao }}</span>
+          <span id="portao-status" class="status">{{ view.portao }}</span>
         </div>
         <div class="actions">
           <form method="post" action="{{ url_for('portao_control', action='open') }}">
@@ -71,13 +71,13 @@
       <article class="card wide">
         <div class="card-head">
           <h2>Gas / Alerta</h2>
-          <span class="status {{ 'alert' if view.gas_alerta else 'safe' }}">{{ 'ALERTA' if view.gas_alerta else 'NORMAL' }}</span>
+          <span id="gas-alert-status" class="status {{ 'alert' if view.gas_alerta else 'safe' }}">{{ 'ALERTA' if view.gas_alerta else 'NORMAL' }}</span>
         </div>
-        <p class="meta">Status do gas: {{ 'ALERTA' if view.gas_alerta else 'NORMAL' }}</p>
-        <p class="meta">Leitura atual: {{ view.gas }} ppm</p>
-        <p class="meta">Limite atual: {{ view.gas_threshold }}</p>
+        <p id="gas-text-status" class="meta">Status do gas: {{ 'ALERTA' if view.gas_alerta else 'NORMAL' }}</p>
+        <p id="gas-ppm" class="meta">Leitura atual: {{ view.gas }} ppm</p>
+        <p id="gas-threshold" class="meta">Limite atual: {{ view.gas_threshold }}</p>
         <form class="threshold-form" method="post" action="{{ url_for('gas_threshold') }}">
-          <input type="number" name="threshold" placeholder="Novo limite" value="{{ view.gas_threshold }}" min="0" step="1">
+          <input id="gas-threshold-input" type="number" name="threshold" placeholder="Novo limite" value="{{ view.gas_threshold }}" min="0" step="1">
           <button type="submit" class="btn btn-primary">Atualizar</button>
         </form>
       </article>
@@ -85,11 +85,74 @@
       <article class="card wide">
         <div class="card-head">
           <h2>Luz</h2>
-          <span class="status">{{ view.luminosidade }}</span>
+          <span id="luz-status" class="status">{{ view.luminosidade }}</span>
         </div>
         <p class="meta">Luminosidade enviada pelo ESP32 via MQTT.</p>
       </article>
     </section>
   </main>
+
+  <script>
+    function setStatusClass(el, isOn) {
+      if (!el) return;
+      el.classList.remove('on', 'off');
+      el.classList.add(isOn ? 'on' : 'off');
+    }
+
+    function setGasClass(el, isAlert) {
+      if (!el) return;
+      el.classList.remove('safe', 'alert');
+      el.classList.add(isAlert ? 'alert' : 'safe');
+    }
+
+    async function refreshState() {
+      try {
+        const response = await fetch('/api/state', { cache: 'no-store' });
+        if (!response.ok) return;
+        const view = await response.json();
+
+        const tempEl = document.getElementById('temp-value');
+        const umidEl = document.getElementById('umid-value');
+        const portaoEl = document.getElementById('portao-status');
+        const gasAlertEl = document.getElementById('gas-alert-status');
+        const gasTextEl = document.getElementById('gas-text-status');
+        const gasPpmEl = document.getElementById('gas-ppm');
+        const gasThresholdEl = document.getElementById('gas-threshold');
+        const gasThresholdInput = document.getElementById('gas-threshold-input');
+        const luzEl = document.getElementById('luz-status');
+
+        if (tempEl) tempEl.textContent = `${view.temperatura} C`;
+        if (umidEl) umidEl.textContent = `${view.umidade} %`;
+        if (portaoEl) portaoEl.textContent = view.portao;
+        if (luzEl) luzEl.textContent = view.luminosidade;
+
+        const gasStatusText = view.gas_alerta ? 'ALERTA' : 'NORMAL';
+        if (gasAlertEl) {
+          gasAlertEl.textContent = gasStatusText;
+          setGasClass(gasAlertEl, view.gas_alerta);
+        }
+        if (gasTextEl) gasTextEl.textContent = `Status do gas: ${gasStatusText}`;
+        if (gasPpmEl) gasPpmEl.textContent = `Leitura atual: ${view.gas} ppm`;
+        if (gasThresholdEl) gasThresholdEl.textContent = `Limite atual: ${view.gas_threshold}`;
+        if (gasThresholdInput && document.activeElement !== gasThresholdInput) {
+          gasThresholdInput.value = view.gas_threshold;
+        }
+
+        if (Array.isArray(view.cards)) {
+          view.cards.forEach((card) => {
+            const statusEl = document.getElementById(`status-${card.key}`);
+            if (!statusEl) return;
+            statusEl.textContent = card.status;
+            setStatusClass(statusEl, card.is_on);
+          });
+        }
+      } catch (err) {
+        // Silencioso para nao poluir o console durante reconexoes de rede/MQTT.
+      }
+    }
+
+    setInterval(refreshState, 1000);
+    refreshState();
+  </script>
 </body>
 </html>
