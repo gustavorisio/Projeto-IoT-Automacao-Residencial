@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Automacao Residencial</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Flask + MQTT</p>
+        <h1>Automacao Residencial</h1>
+        <p class="subtitle">Interface separada do firmware do ESP32 para demonstracao didatica.</p>
+      </div>
+      <div class="hero-panel">
+        <span>Temperatura</span>
+        <strong>{{ view.temperatura }} C</strong>
+        <span>Umidade</span>
+        <strong>{{ view.umidade }} %</strong>
+      </div>
+    </section>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <section class="messages">
+          {% for message in messages %}
+            <div class="message">{{ message }}</div>
+          {% endfor %}
+        </section>
+      {% endif %}
+    {% endwith %}
+
+    <section class="grid">
+      {% for card in view.cards %}
+        <article class="card">
+          <div class="card-head">
+            <h2>{{ card.label }}</h2>
+            <span class="status {{ 'on' if card.is_on else 'off' }}">{{ card.status }}</span>
+          </div>
+          <p class="meta">Tema MQTT: {{ card.status_topic }}</p>
+          <div class="actions">
+            <form method="post" action="{{ url_for('device_control', device=card.key, action='on') }}">
+              <button type="submit" class="btn btn-primary">Ligar</button>
+            </form>
+            <form method="post" action="{{ url_for('device_control', device=card.key, action='off') }}">
+              <button type="submit" class="btn btn-secondary">Desligar</button>
+            </form>
+          </div>
+        </article>
+      {% endfor %}
+    </section>
+
+    <section class="layout-bottom">
+      <article class="card wide">
+        <div class="card-head">
+          <h2>Portao</h2>
+          <span class="status">{{ view.portao }}</span>
+        </div>
+        <div class="actions">
+          <form method="post" action="{{ url_for('portao_control', action='open') }}">
+            <button type="submit" class="btn btn-primary">Abrir</button>
+          </form>
+          <form method="post" action="{{ url_for('portao_control', action='close') }}">
+            <button type="submit" class="btn btn-secondary">Fechar</button>
+          </form>
+        </div>
+      </article>
+
+      <article class="card wide">
+        <div class="card-head">
+          <h2>Gas</h2>
+          <span class="status {{ 'alert' if view.gas_alerta else 'safe' }}">{{ 'ALERTA' if view.gas_alerta else 'NORMAL' }}</span>
+        </div>
+        <p class="meta">Leitura atual: {{ view.gas }} ppm</p>
+        <p class="meta">Limite atual: {{ view.gas_threshold }}</p>
+        <form class="threshold-form" method="post" action="{{ url_for('gas_threshold') }}">
+          <input type="number" name="threshold" placeholder="Novo limite" value="{{ view.gas_threshold }}" min="0" step="1">
+          <button type="submit" class="btn btn-primary">Atualizar</button>
+        </form>
+      </article>
+
+      <article class="card wide">
+        <div class="card-head">
+          <h2>Luz</h2>
+          <span class="status">{{ view.luminosidade }}</span>
+        </div>
+        <p class="meta">Luminosidade enviada pelo ESP32 via MQTT.</p>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
