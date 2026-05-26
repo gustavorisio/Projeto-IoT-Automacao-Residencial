@@ -34,7 +34,8 @@ Este repositório contém meu projeto individual de automação residencial usan
 - `upload_manual.py` — Script utilitário em Python executado localmente na máquina de desenvolvimento para realizar o upload automatizado de arquivos para o sistema de arquivos do ESP32 simulado (via Raw REPL).
 - `app.py` — Backend em Python (Flask) responsável por renderizar a interface web externa e interagir com o broker MQTT.
 - `index.html` e `style.css` — Arquivos de frontend da aplicação Flask, exibindo um painel responsivo com atualização de estado em tempo real.
-
+- `firmware.bin` (Interpretador MicroPython): Este é o arquivo binário pré-compilado que atua como o "sistema operacional" base do ESP32. Ele contém o núcleo do MicroPython e  todos os drivers de baixo nível necessários para controlar o hardware da placa (como Wi-Fi, pinos GPIO, ADC e I2C). O microcontrolador precisa ter esse arquivo gravado (flasheado) 
+em sua memória flash antes de receber qualquer outro script do projeto. É o firmware que permite que a placa entenda a linguagem Python, traduzindo em tempo real a nossa lógica de programação (como o main.py e o ssd1306.py) para instruções de máquina que o processador do ESP32 consegue executar.
 ## Pré-requisitos
 
 - Visual Studio Code
