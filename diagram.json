@@ -16,15 +16,16 @@
     {
       "type": "wokwi-gas-sensor",
       "id": "gas1",
-      "top": 309.9,
+      "top": 319.5,
       "left": -146.6,
       "attrs": { "ppm": "400" }
     },
     { "type": "wokwi-relay-module", "id": "relay1", "top": -150, "left": 250, "attrs": {} },
     { "type": "wokwi-relay-module", "id": "relay2", "top": -50, "left": 250, "attrs": {} },
     { "type": "wokwi-relay-module", "id": "relay3", "top": 50, "left": 250, "attrs": {} },
+    { "type": "wokwi-relay-module", "id": "relay4", "top": 150, "left": 250, "attrs": {} },
     { "type": "wokwi-servo", "id": "servo1", "top": -251.6, "left": 28.8, "attrs": {} },
-    { "type": "wokwi-ssd1306", "id": "oled1", "top": 237.1, "left": 49.9, "attrs": {} },
+    { "type": "wokwi-ssd1306", "id": "oled1", "top": 285.1, "left": 40.3, "attrs": {} },
     {
       "type": "wokwi-text",
       "id": "text1",
@@ -49,8 +50,8 @@
     {
       "type": "wokwi-text",
       "id": "text5",
-      "top": -172.8,
-      "left": 28.8,
+      "top": -163.2,
+      "left": 38.4,
       "attrs": { "text": "Portao(Motor)" }
     },
     {
@@ -77,9 +78,16 @@
     {
       "type": "wokwi-text",
       "id": "text9",
-      "top": 374.4,
-      "left": -134.4,
+      "top": 384,
+      "left": -144,
       "attrs": { "text": "Sensor Gas" }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "text4",
+      "top": 211.2,
+      "left": 268.8,
+      "attrs": { "text": "Portao" }
     }
   ],
   "connections": [
@@ -87,7 +95,7 @@
     [ "esp:RX", "$serialMonitor:TX", "", [] ],
     [ "dht1:VCC", "esp:3V3", "red", [ "v19.2", "h134.4", "v-48" ] ],
     [ "dht1:GND", "esp:GND.1", "black", [ "h134.4", "v96" ] ],
-    [ "dht1:SDA", "esp:15", "yellow", [ "v9.6", "h105.7", "v105.6" ] ],
+    [ "dht1:SDA", "esp:15", "white", [ "v9.6", "h105.7", "v105.6" ] ],
     [ "ldr1:VCC", "esp:3V3", "red", [ "v-201.6" ] ],
     [ "ldr1:GND", "esp:GND.1", "black", [ "h28.8", "v-86.8" ] ],
     [ "ldr1:AO", "esp:34", "green", [ "v-0.7", "h9.6", "v-192" ] ],
@@ -105,10 +113,14 @@
     [ "relay2:IN", "esp:4", "green", [ "h-58", "v155.6" ] ],
     [ "relay3:VCC", "esp:5V", "red", [ "h-48.4", "v142.2", "h-196.99" ] ],
     [ "relay3:GND", "esp:GND.2", "yellow", [ "h-38.8", "v-50.2" ] ],
-    [ "relay3:IN", "esp:5", "green", [ "v26.8", "h-125.2" ] ],
-    [ "servo1:V+", "esp:5V", "red", [ "h-38.4", "v393.7" ] ],
-    [ "servo1:GND", "esp:GND.2", "orange", [ "h-9.6", "v230.4" ] ],
-    [ "servo1:PWM", "esp:18", "white", [ "v288.2" ] ],
+    [ "relay3:IN", "esp:19", "green", [ "v26.8", "h-125.2" ] ],
+    [ "relay4:VCC", "esp:5V", "red", [ "h-48.4", "v42.2", "h-196.99" ] ],
+    [ "relay4:GND", "esp:GND.2", "yellow", [ "h-38.8", "v-150.2", "h-110.44" ] ],
+    [ "relay4:IN", "esp:18", "green", [ "v26.8", "h-85.2" ] ],
+    [ "relay4:COM", "esp:5V", "red", [ "h29.6", "v60", "h-388.99" ] ],
+    [ "relay4:NO", "servo1:V+", "black", [ "h48.8", "v-46", "v-336.1" ] ],
+    [ "servo1:PWM", "esp:5", "white", [ "v288.2" ] ],
+    [ "servo1:GND", "esp:GND.2", "red", [ "h-9.6", "v230.4" ] ],
     [ "oled1:VCC", "esp:3V3", "red", [] ],
     [ "oled1:GND", "esp:GND.3", "black", [ "h0.2", "v-153.1" ] ],
     [ "oled1:SDA", "esp:21", "blue", [] ],
