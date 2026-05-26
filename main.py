@@ -9,15 +9,16 @@ import ssd1306
 # ==========================================
 # 1. CONFIGURAÇÃO DE HARDWARE
 # ==========================================
-# 3 Relés + Servo
+# 3 Relés + Portão (relé + servo)
 rele_sala = Pin(2, Pin.OUT)
 rele_ar = Pin(4, Pin.OUT)
 rele_cozinha = Pin(19, Pin.OUT)
-servo = PWM(Pin(18), freq=50)
+rele_portao = Pin(18, Pin.OUT)
+servo_portao = PWM(Pin(5), freq=50)
 
-for rele in (rele_sala, rele_ar, rele_cozinha):
+for rele in (rele_sala, rele_ar, rele_cozinha, rele_portao):
     rele.value(0)
-servo.duty(40) # Portão inicia fechado
+servo_portao.duty(40)
 
 # 4 Sensores
 sensor_dht = dht.DHT22(Pin(15))
@@ -79,7 +80,7 @@ def atualizar_oled(temp, umid, luz, gas, status_gas, status_portao):
 # ==========================================
 # 2. CONFIGURAÇÕES MQTT
 # ==========================================
-MQTT_CLIENT_ID = b"esp32_automacao_tcc" 
+MQTT_CLIENT_ID = b"esp32_automacao_tcc"
 MQTT_BROKER = "6732ba7fb9bf481da315e7a247a59011.s1.eu.hivemq.cloud"
 MQTT_PORT = 8883
 MQTT_USER = b"admin"
@@ -107,10 +108,12 @@ def conectar_wifi():
 
 def atualizar_portao(estado, movimento):
     global last_status_portao, portao_movendo_ate, portao_estado_desejado
-    if estado == "ABERTO":
-        servo.duty(115)
-    else:
-        servo.duty(40)
+    # O relé energiza o conjunto do portão e o PWM define a posição do servo.
+    try:
+        rele_portao.value(1)
+        servo_portao.duty(115 if estado == "ABERTO" else 40)
+    except Exception:
+        pass
     portao_estado_desejado = estado
     portao_movendo_ate = time.time() + PORTAO_TEMPO_MOVIMENTO
     last_status_portao = movimento
@@ -267,6 +270,10 @@ try:
                 # --- Finaliza portão ---
                 if portao_movendo_ate and agora >= portao_movendo_ate:
                     last_status_portao = portao_estado_desejado
+                    try:
+                        rele_portao.value(0)
+                    except Exception:
+                        pass
                     client.publish(b"residencia/portao/status", last_status_portao.encode(), retain=True)
                     client.publish(b"residencia/sensores/portao", last_status_portao.encode(), retain=True)
                     portao_movendo_ate = 0
