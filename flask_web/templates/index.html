@@ -70,9 +70,10 @@
 
       <article class="card wide">
         <div class="card-head">
-          <h2>Gas</h2>
+          <h2>Gas / Alerta</h2>
           <span class="status {{ 'alert' if view.gas_alerta else 'safe' }}">{{ 'ALERTA' if view.gas_alerta else 'NORMAL' }}</span>
         </div>
+        <p class="meta">Status do gas: {{ 'ALERTA' if view.gas_alerta else 'NORMAL' }}</p>
         <p class="meta">Leitura atual: {{ view.gas }} ppm</p>
         <p class="meta">Limite atual: {{ view.gas_threshold }}</p>
         <form class="threshold-form" method="post" action="{{ url_for('gas_threshold') }}">
